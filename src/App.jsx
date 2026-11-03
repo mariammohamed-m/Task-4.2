@@ -177,6 +177,8 @@ const cap = (s) =>
   s === "like-new"
     ? "Like new"
     : (s || "").replace(/\b\w/g, (m) => m.toUpperCase());
+const limitWords = (text, max = 200) =>
+  text.trim().split(/\s+/).slice(0, max).join(" ");
 function findError(form) {
   if (!form.title.trim()) return "Please complete the item title.";
   if (
@@ -189,6 +191,8 @@ function findError(form) {
   if (!conditions.includes(form.condition)) return "Choose an item condition.";
   if (!["active", "sold"].includes(form.status))
     return "Choose a valid status.";
+  if (form.description.trim().split(/\s+/).filter(Boolean).length > 200)
+    return "Keep the description to 200 words or fewer.";
   return "";
 }
 function ListingImage({ src, alt, emoji, className = "" }) {
@@ -214,6 +218,7 @@ export default function App() {
   const [category, setCategory] = useState("all");
   const [condition, setCondition] = useState("all");
   const [sort, setSort] = useState("featured");
+  const [listingView, setListingView] = useState("all");
   const [selected, setSelected] = useState(null);
   const [editor, setEditor] = useState(null); // null or {id,form}
   const [error, setError] = useState("");
@@ -224,6 +229,7 @@ export default function App() {
   const listing = useMemo(() => {
     let a = items.filter(
       (x) =>
+        (listingView === "all" || x.owner === "you") &&
         (category === "all" || x.category === category) &&
         (condition === "all" || x.condition === condition) &&
         `${x.title} ${x.category} ${x.description}`
@@ -233,7 +239,7 @@ export default function App() {
     if (sort === "low") a.sort((a, b) => a.price - b.price);
     if (sort === "high") a.sort((a, b) => b.price - a.price);
     return a;
-  }, [items, category, condition, query, sort]);
+  }, [items, category, condition, listingView, query, sort]);
   function startEdit(item) {
     if (item && item.owner !== "you") return;
     setError("");
@@ -294,6 +300,7 @@ export default function App() {
     setCategory("all");
     setCondition("all");
     setSort("featured");
+    setListingView("all");
     setNotice("Example items restored.");
   }
   return (
@@ -308,16 +315,28 @@ export default function App() {
           onClick={() => {
             setSelected(null);
             setCategory("all");
+            setListingView("all");
           }}
         >
           <span className="brand-icon">✳</span> CAMPUS
           <span className="brand-alt">exchange</span>
         </button>
+        <nav className="listing-nav" aria-label="Listing views">
+          <button
+            className={listingView === "all" ? "active" : ""}
+            onClick={() => setListingView("all")}
+          >
+            All listings
+          </button>
+          <button
+            className={listingView === "mine" ? "active" : ""}
+            onClick={() => setListingView("mine")}
+          >
+            My listings
+          </button>
+        </nav>
         <div className="nav-actions">
           <span className="usercircle">Y</span>
-          <button className="sell-cta" onClick={() => startEdit(null)}>
-            + Sell an item
-          </button>
         </div>
       </header>
       <main>
@@ -333,14 +352,8 @@ export default function App() {
               Browse little finds, big essentials and almost everything in
               between.
             </p>
-            <button
-              onClick={() =>
-                document
-                  .getElementById("discover")
-                  ?.scrollIntoView({ behavior: "smooth" })
-              }
-            >
-              Explore listings <span>↗</span>
+            <button className="sell-cta hero-sell" onClick={() => startEdit(null)}>
+              + Sell an item
             </button>
           </div>
           <div className="promo-art">
@@ -413,8 +426,20 @@ export default function App() {
           )}
           <div className="listing-grid">
             {listing.map((item) => (
-              <article className="product" key={item.id}>
-                <button className="photo" onClick={() => setSelected(item.id)}>
+              <article
+                className="product"
+                key={item.id}
+                role="button"
+                tabIndex="0"
+                onClick={() => setSelected(item.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelected(item.id);
+                  }
+                }}
+              >
+                <div className="photo">
                   <span className="stamp">{cap(item.condition)}</span>
                   <ListingImage
                     src={item.photos?.[0]}
@@ -422,24 +447,24 @@ export default function App() {
                     emoji={item.emoji}
                     className="listing-img"
                   />
-                  <span className="category-caption">{cap(item.category)}</span>
-                </button>
+                </div>
                 <div className="prod-details">
                   <div className="prod-topline">
                     <span className="muted">{item.category}</span>
-                    <span
-                      className={
-                        item.status === "sold" ? "soldstatus" : "instock"
-                      }
-                    >
-                      {item.status.toUpperCase()}
-                    </span>
+                    {listingView === "mine" && (
+                      <span
+                        className={
+                          item.status === "sold" ? "soldstatus" : "instock"
+                        }
+                      >
+                        {item.status.toUpperCase()}
+                      </span>
+                    )}
                   </div>
                   <h3>{item.title}</h3>
                   <p>{item.description}</p>
                   <div className="costline">
                     <strong>EGP {item.price.toLocaleString()}</strong>
-                    <span>{item.condition}</span>
                   </div>
                 </div>
               </article>
@@ -535,7 +560,9 @@ export default function App() {
                     {item.seller}
                   </p>
                 </div>
-                <p className="muted">Status: {item.status}</p>
+                {listingView === "mine" && (
+                  <p className="muted">Status: {item.status}</p>
+                )}
                 {item.owner === "you" ? (
                   <button className="sell-cta" onClick={() => startEdit(item)}>
                     Edit your listing
@@ -651,12 +678,18 @@ export default function App() {
                     onChange={(e) =>
                       setEditor((s) => ({
                         ...s,
-                        form: { ...s.form, description: e.target.value },
+                        form: {
+                          ...s.form,
+                          description: limitWords(e.target.value),
+                        },
                       }))
                     }
                     placeholder="Description"
                     rows="5"
                   />
+                  <small className="word-limit">
+                    Maximum 200 words
+                  </small>
                 </label>
                 <label className="wide">
                   <span>Pickup / meetup location</span>
